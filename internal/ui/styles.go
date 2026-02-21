@@ -2,150 +2,226 @@ package ui
 
 import "github.com/charmbracelet/lipgloss"
 
-// Color palette
+// ---------------------------------------------------------------------------
+// Color palette (adaptive: works on both dark and light terminals)
+// ---------------------------------------------------------------------------
 var (
-	colorPrimary  = lipgloss.Color("#7C3AED") // purple
-	colorAccent   = lipgloss.Color("#06B6D4") // cyan
-	colorSuccess  = lipgloss.Color("#10B981") // green
-	colorWarning  = lipgloss.Color("#F59E0B") // amber
-	colorDanger   = lipgloss.Color("#EF4444") // red
-	colorMuted    = lipgloss.Color("#6B7280") // gray
-	colorFg       = lipgloss.Color("#F9FAFB") // near-white
-	colorBg       = lipgloss.Color("#111827") // near-black
-	colorSelected = lipgloss.Color("#1E1B4B") // deep indigo
-	colorBorder   = lipgloss.Color("#374151") // dark gray
-	colorHeaderBg = lipgloss.Color("#1F2937") // dark slate
+	colorPrimary  = lipgloss.AdaptiveColor{Dark: "#A78BFA", Light: "#6D28D9"}
+	colorAccent   = lipgloss.AdaptiveColor{Dark: "#38BDF8", Light: "#0369A1"}
+	colorSuccess  = lipgloss.AdaptiveColor{Dark: "#34D399", Light: "#047857"}
+	colorWarning  = lipgloss.AdaptiveColor{Dark: "#FBBF24", Light: "#B45309"}
+	colorDanger   = lipgloss.AdaptiveColor{Dark: "#F87171", Light: "#B91C1C"}
+	colorMuted    = lipgloss.AdaptiveColor{Dark: "#6B7280", Light: "#9CA3AF"}
+	colorFg       = lipgloss.AdaptiveColor{Dark: "#F1F5F9", Light: "#0F172A"}
+	colorSubtle   = lipgloss.AdaptiveColor{Dark: "#CBD5E1", Light: "#475569"}
+	colorBorder   = lipgloss.AdaptiveColor{Dark: "#334155", Light: "#CBD5E1"}
+	colorHeaderBg = lipgloss.AdaptiveColor{Dark: "#1E293B", Light: "#E2E8F0"}
+	colorSelBg    = lipgloss.AdaptiveColor{Dark: "#1D3461", Light: "#BFDBFE"}
+	colorSelFg    = lipgloss.AdaptiveColor{Dark: "#E0F2FE", Light: "#1E3A5F"}
+	colorTitleBg  = lipgloss.AdaptiveColor{Dark: "#4C1D95", Light: "#7C3AED"}
 )
 
-// Header bar at the top of the screen
-var HeaderStyle = lipgloss.NewStyle().
-	Background(colorPrimary).
-	Foreground(colorFg).
-	Bold(true).
-	Padding(0, 2).
-	Width(0) // set dynamically
+// ---------------------------------------------------------------------------
+// Layout constants
+// ---------------------------------------------------------------------------
+const (
+	headerHeight = 3 // top bar height in lines
+	footerHeight = 1 // bottom bar height in lines
+)
 
-// AppTitleStyle is the app name inside the header
-var AppTitleStyle = lipgloss.NewStyle().
+// ---------------------------------------------------------------------------
+// Header
+// ---------------------------------------------------------------------------
+
+var HeaderBarStyle = lipgloss.NewStyle().
+	Background(colorTitleBg).
 	Foreground(colorFg).
 	Bold(true)
 
-// FooterStyle is the keybind hint bar at the bottom
+var HeaderTitleStyle = lipgloss.NewStyle().
+	Background(colorTitleBg).
+	Foreground(lipgloss.AdaptiveColor{Dark: "#FFFFFF", Light: "#FFFFFF"}).
+	Bold(true).
+	Padding(0, 2)
+
+var HeaderSubtitleStyle = lipgloss.NewStyle().
+	Background(colorTitleBg).
+	Foreground(lipgloss.AdaptiveColor{Dark: "#C4B5FD", Light: "#EDE9FE"}).
+	Padding(0, 1)
+
+var HeaderDividerStyle = lipgloss.NewStyle().
+	Background(colorHeaderBg).
+	Foreground(colorBorder)
+
+// ---------------------------------------------------------------------------
+// Footer
+// ---------------------------------------------------------------------------
+
 var FooterStyle = lipgloss.NewStyle().
 	Background(colorHeaderBg).
 	Foreground(colorMuted).
 	Padding(0, 2)
 
-// FooterKeyStyle highlights a key name in the footer
 var FooterKeyStyle = lipgloss.NewStyle().
+	Background(colorHeaderBg).
 	Foreground(colorAccent).
 	Bold(true)
 
-// FooterDescStyle is the description next to a key
 var FooterDescStyle = lipgloss.NewStyle().
+	Background(colorHeaderBg).
 	Foreground(colorMuted)
 
-// TableHeaderStyle styles the column header row
+var FooterSepStyle = lipgloss.NewStyle().
+	Background(colorHeaderBg).
+	Foreground(colorBorder)
+
+// ---------------------------------------------------------------------------
+// Table
+// ---------------------------------------------------------------------------
+
 var TableHeaderStyle = lipgloss.NewStyle().
 	Background(colorHeaderBg).
 	Foreground(colorAccent).
 	Bold(true).
 	Padding(0, 1)
 
-// RowNormalStyle is an unselected, up-to-date row
 var RowNormalStyle = lipgloss.NewStyle().
 	Foreground(colorFg).
 	Padding(0, 1)
 
-// RowOutdatedStyle highlights an outdated package
 var RowOutdatedStyle = lipgloss.NewStyle().
 	Foreground(colorWarning).
 	Padding(0, 1)
 
-// RowSelectedStyle is the cursor row
 var RowSelectedStyle = lipgloss.NewStyle().
-	Background(colorSelected).
-	Foreground(colorFg).
+	Background(colorSelBg).
+	Foreground(colorSelFg).
 	Bold(true).
 	Padding(0, 1)
 
-// RowSelectedOutdatedStyle is the cursor row when the package is outdated
 var RowSelectedOutdatedStyle = lipgloss.NewStyle().
-	Background(colorSelected).
+	Background(colorSelBg).
 	Foreground(colorWarning).
 	Bold(true).
 	Padding(0, 1)
 
-// StatusUpToDate badge
-var StatusUpToDate = lipgloss.NewStyle().
+// Status badge styles
+var BadgeOkStyle = lipgloss.NewStyle().
 	Foreground(colorSuccess).
-	Bold(true).
-	Render("✓ up-to-date")
+	Bold(true)
 
-// StatusOutdated badge
-var StatusOutdated = lipgloss.NewStyle().
+var BadgeOutdatedStyle = lipgloss.NewStyle().
 	Foreground(colorWarning).
-	Bold(true).
-	Render("↑ outdated")
+	Bold(true)
 
-// SpinnerStyle
-var SpinnerStyle = lipgloss.NewStyle().
-	Foreground(colorAccent)
+var BadgeOkSelectedStyle = lipgloss.NewStyle().
+	Background(colorSelBg).
+	Foreground(colorSuccess).
+	Bold(true)
 
-// PanelStyle is the border for detail / doctor panels
-var PanelStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(colorBorder).
-	Padding(1, 2)
+var BadgeOutdatedSelectedStyle = lipgloss.NewStyle().
+	Background(colorSelBg).
+	Foreground(colorWarning).
+	Bold(true)
 
-// PanelTitleStyle is the bold title inside a panel
-var PanelTitleStyle = lipgloss.NewStyle().
-	Foreground(colorPrimary).
-	Bold(true).
-	MarginBottom(1)
+// Stat bar at the bottom of the table
+var StatBarStyle = lipgloss.NewStyle().
+	Background(colorHeaderBg).
+	Foreground(colorMuted).
+	Padding(0, 1)
 
-// LabelStyle is a field label inside a panel
-var LabelStyle = lipgloss.NewStyle().
+var StatHighlightStyle = lipgloss.NewStyle().
+	Background(colorHeaderBg).
 	Foreground(colorAccent).
 	Bold(true)
 
-// ValueStyle is a field value inside a panel
+var StatWarningStyle = lipgloss.NewStyle().
+	Background(colorHeaderBg).
+	Foreground(colorWarning).
+	Bold(true)
+
+// ---------------------------------------------------------------------------
+// Spinner
+// ---------------------------------------------------------------------------
+
+var SpinnerStyle = lipgloss.NewStyle().
+	Foreground(colorAccent)
+
+// ---------------------------------------------------------------------------
+// Panels (detail, doctor)
+// ---------------------------------------------------------------------------
+
+var PanelStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(colorBorder).
+	Padding(0, 1)
+
+var PanelTitleStyle = lipgloss.NewStyle().
+	Foreground(colorPrimary).
+	Bold(true)
+
+var SectionTitleStyle = lipgloss.NewStyle().
+	Foreground(colorAccent).
+	Bold(true)
+
+var LabelStyle = lipgloss.NewStyle().
+	Foreground(colorSubtle).
+	Bold(true)
+
 var ValueStyle = lipgloss.NewStyle().
 	Foreground(colorFg)
 
-// MutedStyle is muted / secondary text
 var MutedStyle = lipgloss.NewStyle().
 	Foreground(colorMuted)
 
-// SuccessStyle for success messages
 var SuccessStyle = lipgloss.NewStyle().
 	Foreground(colorSuccess).
 	Bold(true)
 
-// ErrorStyle for error messages
 var ErrorStyle = lipgloss.NewStyle().
 	Foreground(colorDanger).
 	Bold(true)
 
-// WarningStyle for warning text
 var WarningStyle = lipgloss.NewStyle().
 	Foreground(colorWarning).
 	Bold(true)
 
-// ConfirmPromptStyle for confirm dialogs
-var ConfirmPromptStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(colorDanger).
-	Padding(1, 3).
+// Badge for package status inside detail panel
+var DetailBadgeUpToDateStyle = lipgloss.NewStyle().
+	Background(lipgloss.AdaptiveColor{Dark: "#064E3B", Light: "#D1FAE5"}).
+	Foreground(lipgloss.AdaptiveColor{Dark: "#34D399", Light: "#065F46"}).
 	Bold(true).
-	Foreground(colorFg)
-
-// SearchInputStyle for the search text input box
-var SearchInputStyle = lipgloss.NewStyle().
-	Border(lipgloss.RoundedBorder()).
-	BorderForeground(colorAccent).
 	Padding(0, 1)
 
-// DividerStyle is a horizontal separator line
+var DetailBadgeOutdatedStyle = lipgloss.NewStyle().
+	Background(lipgloss.AdaptiveColor{Dark: "#451A03", Light: "#FEF3C7"}).
+	Foreground(lipgloss.AdaptiveColor{Dark: "#FBBF24", Light: "#92400E"}).
+	Bold(true).
+	Padding(0, 1)
+
+// ---------------------------------------------------------------------------
+// Search
+// ---------------------------------------------------------------------------
+
+var SearchPromptStyle = lipgloss.NewStyle().
+	Foreground(colorAccent).
+	Bold(true)
+
+var SearchResultCountStyle = lipgloss.NewStyle().
+	Foreground(colorMuted)
+
+// ---------------------------------------------------------------------------
+// Confirm dialog
+// ---------------------------------------------------------------------------
+
+var ConfirmBoxStyle = lipgloss.NewStyle().
+	Border(lipgloss.RoundedBorder()).
+	BorderForeground(colorDanger).
+	Padding(1, 4)
+
+// ---------------------------------------------------------------------------
+// Divider
+// ---------------------------------------------------------------------------
+
 var DividerStyle = lipgloss.NewStyle().
 	Foreground(colorBorder)
