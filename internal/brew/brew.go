@@ -88,6 +88,14 @@ func runBrewCommand(args ...string) (string, error) {
 	return string(out), err
 }
 
+// runBrewStdout runs a brew subcommand and returns only stdout.
+// Use this for JSON-producing commands where stderr noise would break parsing.
+func runBrewStdout(args ...string) (string, error) {
+	cmd := exec.Command("brew", args...)
+	out, err := cmd.Output()
+	return string(out), err
+}
+
 // ListInstalled returns all top-level installed packages (brew leaves) with
 // their installed versions. Outdated information is merged in separately.
 func ListInstalled() ([]Package, error) {
@@ -172,7 +180,7 @@ func ListInstalled() ([]Package, error) {
 // getOutdatedMap returns a map of package name -> latest available version
 // for all outdated packages.
 func getOutdatedMap() (map[string]string, error) {
-	out, err := runBrewCommand("outdated", "--json=v2")
+	out, err := runBrewStdout("outdated", "--json=v2")
 	if err != nil {
 		// brew outdated exits 1 when there ARE outdated packages — that is normal
 		if out == "" {
@@ -194,7 +202,7 @@ func getOutdatedMap() (map[string]string, error) {
 
 // GetOutdated returns only the outdated packages.
 func GetOutdated() ([]Package, error) {
-	out, err := runBrewCommand("outdated", "--json=v2")
+	out, err := runBrewStdout("outdated", "--json=v2")
 	if err != nil && out == "" {
 		return nil, fmt.Errorf("brew outdated failed: %w", err)
 	}
@@ -222,7 +230,7 @@ func GetOutdated() ([]Package, error) {
 
 // GetInfo returns detailed information about a single package.
 func GetInfo(name string) (*InfoResult, error) {
-	out, err := runBrewCommand("info", "--json=v2", name)
+	out, err := runBrewStdout("info", "--json=v2", name)
 	if err != nil && out == "" {
 		return nil, fmt.Errorf("brew info failed: %w", err)
 	}
@@ -286,7 +294,7 @@ func Uninstall(name string) (string, error) {
 
 // Search runs `brew search --formula --json=v2 <query>` and returns matching names+descriptions.
 func Search(query string) ([]Package, error) {
-	out, err := runBrewCommand("search", "--formula", "--json=v2", query)
+	out, err := runBrewStdout("search", "--formula", "--json=v2", query)
 	if err != nil && out == "" {
 		return nil, fmt.Errorf("brew search failed: %w", err)
 	}
@@ -319,16 +327,22 @@ func Doctor() (string, error) {
 
 // --- helpers ---
 
-func parseLines(s string) []string {
-	lines := strings.Split(strings.TrimSpace(s), "\n")
-	out := make([]string, 0, len(lines))
-	for _, l := range lines {
-		l = strings.TrimSpace(l)
-		if l != "" {
-			out = append(out, l)
+var (
+	cellarOnce   sync.Once
+	cellarCached string
+)
+
+// cellarPrefix returns the path to the Homebrew Cellar directory (cached).
+func cellarPrefix() string {
+	cellarOnce.Do(func() {
+		out, err := exec.Command("brew", "--cellar").Output()
+		if err != nil {
+			cellarCached = "/opt/homebrew/Cellar"
+			return
 		}
-	}
-	return out
+		cellarCached = strings.TrimSpace(string(out))
+	})
+	return cellarCached
 }
 
 func parsePlainSearch(out string) []Package {
@@ -339,13 +353,16 @@ func parsePlainSearch(out string) []Package {
 	return pkgs
 }
 
-// cellarPrefix returns the path to the Homebrew Cellar directory.
-func cellarPrefix() string {
-	out, err := exec.Command("brew", "--cellar").Output()
-	if err != nil {
-		return "/opt/homebrew/Cellar"
+func parseLines(s string) []string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	out := make([]string, 0, len(lines))
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
 	}
-	return strings.TrimSpace(string(out))
+	return out
 }
 
 // diskUsage returns a human-readable disk usage string for the given path,
