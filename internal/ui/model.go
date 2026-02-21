@@ -19,6 +19,16 @@ const (
 	ViewDoctor
 )
 
+// ConfirmAction tracks which destructive action is awaiting y/n confirmation.
+type ConfirmAction int
+
+const (
+	ConfirmNone ConfirmAction = iota
+	ConfirmUninstall
+	ConfirmUpgrade
+	ConfirmUpgradeAll
+)
+
 // ---------------------------------------------------------------------------
 // Messages
 // ---------------------------------------------------------------------------
@@ -68,6 +78,9 @@ type Model struct {
 
 	statusMsg   string
 	statusIsErr bool
+
+	confirmAction ConfirmAction
+	confirmTarget string // package name being acted on
 }
 
 func New() Model {
@@ -207,6 +220,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // ---------------------------------------------------------------------------
 
 func (m Model) handleTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// If a confirm prompt is active, only handle y/n/esc
+	if m.confirmAction != ConfirmNone {
+		switch msg.String() {
+		case "y":
+			action := m.confirmAction
+			target := m.confirmTarget
+			m.confirmAction = ConfirmNone
+			m.confirmTarget = ""
+			m.tableModel.setConfirm(false)
+			var cmds []tea.Cmd
+			switch action {
+			case ConfirmUninstall:
+				m.loading = true
+				m.loadingMsg = "Uninstalling " + target + "..."
+				cmds = append(cmds, m.spinner.Tick, uninstallCmd(target))
+			case ConfirmUpgrade:
+				m.loading = true
+				m.loadingMsg = "Upgrading " + target + "..."
+				cmds = append(cmds, m.spinner.Tick, upgradeCmd(target))
+			case ConfirmUpgradeAll:
+				m.loading = true
+				m.loadingMsg = "Upgrading all outdated packages..."
+				cmds = append(cmds, m.spinner.Tick, upgradeAllCmd())
+			}
+			return m, tea.Batch(cmds...)
+		case "n", "esc":
+			m.confirmAction = ConfirmNone
+			m.confirmTarget = ""
+			m.tableModel.setConfirm(false)
+		}
+		return m, nil
+	}
+
 	// First let the table model handle navigation keys
 	var tableCmd tea.Cmd
 	m.tableModel, tableCmd = m.tableModel.Update(msg)
@@ -235,34 +281,22 @@ func (m Model) handleTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "u":
 		if pkg := m.tableModel.selectedPackage(); pkg != nil && pkg.Outdated {
-			m.loading = true
-			m.loadingMsg = "Upgrading " + pkg.Name + "..."
-			cmds = append(cmds, m.spinner.Tick, upgradeCmd(pkg.Name))
-		}
-
-	case "U":
-		m.loading = true
-		m.loadingMsg = "Upgrading all outdated packages..."
-		cmds = append(cmds, m.spinner.Tick, upgradeAllCmd())
-
-	case "x":
-		if m.tableModel.selectedPackage() != nil {
+			m.confirmAction = ConfirmUpgrade
+			m.confirmTarget = pkg.Name
 			m.tableModel.setConfirm(true)
 		}
 
-	case "y":
-		if m.tableModel.confirmPending {
-			pkg := m.tableModel.selectedPackage()
-			m.tableModel.setConfirm(false)
-			if pkg != nil {
-				m.loading = true
-				m.loadingMsg = "Uninstalling " + pkg.Name + "..."
-				cmds = append(cmds, m.spinner.Tick, uninstallCmd(pkg.Name))
-			}
-		}
+	case "U":
+		m.confirmAction = ConfirmUpgradeAll
+		m.confirmTarget = ""
+		m.tableModel.setConfirm(true)
 
-	case "n":
-		m.tableModel.setConfirm(false)
+	case "x":
+		if pkg := m.tableModel.selectedPackage(); pkg != nil {
+			m.confirmAction = ConfirmUninstall
+			m.confirmTarget = pkg.Name
+			m.tableModel.setConfirm(true)
+		}
 
 	case "/":
 		m.activeView = ViewSearch
@@ -278,6 +312,35 @@ func (m Model) handleTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// If a confirm prompt is active, only handle y/n/esc
+	if m.confirmAction != ConfirmNone {
+		switch msg.String() {
+		case "y":
+			action := m.confirmAction
+			target := m.confirmTarget
+			m.confirmAction = ConfirmNone
+			m.confirmTarget = ""
+			var cmds []tea.Cmd
+			switch action {
+			case ConfirmUninstall:
+				m.loading = true
+				m.loadingMsg = "Uninstalling " + target + "..."
+				m.activeView = ViewTable
+				cmds = append(cmds, m.spinner.Tick, uninstallCmd(target))
+			case ConfirmUpgrade:
+				m.loading = true
+				m.loadingMsg = "Upgrading " + target + "..."
+				m.activeView = ViewTable
+				cmds = append(cmds, m.spinner.Tick, upgradeCmd(target))
+			}
+			return m, tea.Batch(cmds...)
+		case "n", "esc":
+			m.confirmAction = ConfirmNone
+			m.confirmTarget = ""
+		}
+		return m, nil
+	}
+
 	// Forward to detail model for scrolling
 	var cmd tea.Cmd
 	m.detailModel, cmd = m.detailModel.Update(msg)
@@ -293,19 +356,14 @@ func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detailModel.info != nil {
 			pkg := m.tableModel.selectedPackage()
 			if pkg != nil && pkg.Outdated {
-				m.loading = true
-				m.loadingMsg = "Upgrading " + pkg.Name + "..."
-				m.activeView = ViewTable
-				cmds = append(cmds, m.spinner.Tick, upgradeCmd(pkg.Name))
+				m.confirmAction = ConfirmUpgrade
+				m.confirmTarget = pkg.Name
 			}
 		}
 	case "x":
 		if m.detailModel.info != nil {
-			name := m.detailModel.info.Name
-			m.loading = true
-			m.loadingMsg = "Uninstalling " + name + "..."
-			m.activeView = ViewTable
-			cmds = append(cmds, m.spinner.Tick, uninstallCmd(name))
+			m.confirmAction = ConfirmUninstall
+			m.confirmTarget = m.detailModel.info.Name
 		}
 	}
 	return m, tea.Batch(cmds...)
@@ -435,8 +493,17 @@ func (m Model) renderFooter() string {
 		} else {
 			leftPart = SuccessStyle.Render("✓ " + m.statusMsg)
 		}
-	} else if m.tableModel.confirmPending && m.activeView == ViewTable {
-		leftPart = WarningStyle.Render("Uninstall? ") +
+	} else if m.confirmAction != ConfirmNone {
+		var prompt string
+		switch m.confirmAction {
+		case ConfirmUninstall:
+			prompt = "Uninstall " + m.confirmTarget + "?"
+		case ConfirmUpgrade:
+			prompt = "Upgrade " + m.confirmTarget + "?"
+		case ConfirmUpgradeAll:
+			prompt = "Upgrade all outdated packages?"
+		}
+		leftPart = WarningStyle.Render(prompt+" ") +
 			FooterKeyStyle.Render("y") + FooterDescStyle.Render(" yes") +
 			FooterSepStyle.Render("  /  ") +
 			FooterKeyStyle.Render("n") + FooterDescStyle.Render(" no")
