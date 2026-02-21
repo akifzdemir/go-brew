@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync"
 )
 
 // Package represents an installed Homebrew package.
@@ -13,20 +15,22 @@ type Package struct {
 	InstalledVersion string
 	LatestVersion    string
 	Outdated         bool
+	InstalledSize    string // e.g. "54M", "1.2G", "—" if unknown
 }
 
 // InfoResult holds the output of `brew info --json=v2 <name>`.
 type InfoResult struct {
-	Name         string
-	FullName     string
-	Tap          string
-	Version      string
-	Desc         string
-	Homepage     string
-	License      string
-	Dependencies []string
-	Conflicts    []string
-	Installed    []InstalledVersion
+	Name          string
+	FullName      string
+	Tap           string
+	Version       string
+	Desc          string
+	Homepage      string
+	License       string
+	Dependencies  []string
+	Conflicts     []string
+	Installed     []InstalledVersion
+	InstalledSize string // disk usage of the cellar directory
 }
 
 type InstalledVersion struct {
@@ -147,6 +151,21 @@ func ListInstalled() ([]Package, error) {
 		}
 		packages = append(packages, pkg)
 	}
+
+	// Fetch disk sizes concurrently
+	cellar := cellarPrefix()
+	var wg sync.WaitGroup
+	for i := range packages {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			pkg := &packages[i]
+			dir := filepath.Join(cellar, pkg.Name, pkg.InstalledVersion)
+			pkg.InstalledSize = diskUsage(dir)
+		}(i)
+	}
+	wg.Wait()
+
 	return packages, nil
 }
 
@@ -228,17 +247,25 @@ func GetInfo(name string) (*InfoResult, error) {
 		installed = append(installed, InstalledVersion{Version: iv.Version})
 	}
 
+	// Disk size from cellar
+	installedVer := ""
+	if len(installed) > 0 {
+		installedVer = installed[len(installed)-1].Version
+	}
+	size := diskUsage(filepath.Join(cellarPrefix(), f.Name, installedVer))
+
 	return &InfoResult{
-		Name:         f.Name,
-		FullName:     f.FullName,
-		Tap:          f.Tap,
-		Version:      f.Versions.Stable,
-		Desc:         f.Desc,
-		Homepage:     f.Homepage,
-		License:      f.License,
-		Dependencies: f.Dependencies,
-		Conflicts:    conflicts,
-		Installed:    installed,
+		Name:          f.Name,
+		FullName:      f.FullName,
+		Tap:           f.Tap,
+		Version:       f.Versions.Stable,
+		Desc:          f.Desc,
+		Homepage:      f.Homepage,
+		License:       f.License,
+		Dependencies:  f.Dependencies,
+		Conflicts:     conflicts,
+		Installed:     installed,
+		InstalledSize: size,
 	}, nil
 }
 
@@ -310,4 +337,31 @@ func parsePlainSearch(out string) []Package {
 		pkgs = append(pkgs, Package{Name: line})
 	}
 	return pkgs
+}
+
+// cellarPrefix returns the path to the Homebrew Cellar directory.
+func cellarPrefix() string {
+	out, err := exec.Command("brew", "--cellar").Output()
+	if err != nil {
+		return "/opt/homebrew/Cellar"
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// diskUsage returns a human-readable disk usage string for the given path,
+// e.g. "54M", "1.2G". Returns "—" if the path doesn't exist or du fails.
+func diskUsage(dir string) string {
+	if dir == "" {
+		return "—"
+	}
+	out, err := exec.Command("du", "-sh", dir).Output()
+	if err != nil {
+		return "—"
+	}
+	// du output format: "<size>\t<path>"
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 2)
+	if len(parts) == 0 {
+		return "—"
+	}
+	return strings.TrimSpace(parts[0])
 }

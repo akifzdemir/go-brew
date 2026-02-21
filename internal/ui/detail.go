@@ -187,6 +187,9 @@ func (d DetailModel) buildLines() []string {
 	if len(ivs) > 0 {
 		lines = append(lines, field("Installed", strings.Join(ivs, ", ")))
 	}
+	if info.InstalledSize != "" {
+		lines = append(lines, field("Size", info.InstalledSize))
+	}
 	lines = append(lines, "")
 
 	// ── Dependencies ────────────────────────────────────────────────────────

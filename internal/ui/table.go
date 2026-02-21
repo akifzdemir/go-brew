@@ -97,13 +97,14 @@ func (t TableModel) View(height int) string {
 	}
 
 	// Dynamic column widths based on terminal width
-	// Layout: │ # │ Name │ Installed │ Latest │ Status │
-	//          3    dyn    12          12        12
+	// Layout: │ # │ Name │ Installed │ Latest │ Size │ Status │
+	//          3    dyn    12          12        9      12
 	colIdx := 4
 	colStatus := 14
 	colVer := 13
 	colLatest := 13
-	colName := t.width - colIdx - colVer - colLatest - colStatus - 2 // 2 = padding
+	colSize := 9
+	colName := t.width - colIdx - colVer - colLatest - colSize - colStatus - 2 // 2 = padding
 	if colName < 10 {
 		colName = 10
 	}
@@ -111,7 +112,7 @@ func (t TableModel) View(height int) string {
 	var sb strings.Builder
 
 	// Column header row
-	sb.WriteString(t.renderHeader(colIdx, colName, colVer, colLatest, colStatus))
+	sb.WriteString(t.renderHeader(colIdx, colName, colVer, colLatest, colSize, colStatus))
 	sb.WriteString("\n")
 	sb.WriteString(DividerStyle.Render(strings.Repeat("─", t.width)))
 	sb.WriteString("\n")
@@ -128,7 +129,7 @@ func (t TableModel) View(height int) string {
 			end = len(t.packages)
 		}
 		for i := t.offset; i < end; i++ {
-			sb.WriteString(t.renderRow(i, colIdx, colName, colVer, colLatest, colStatus))
+			sb.WriteString(t.renderRow(i, colIdx, colName, colVer, colLatest, colSize, colStatus))
 			sb.WriteString("\n")
 		}
 		// Pad remaining lines so the stat bar stays at the bottom
@@ -144,16 +145,17 @@ func (t TableModel) View(height int) string {
 	return sb.String()
 }
 
-func (t TableModel) renderHeader(colIdx, colName, colVer, colLatest, colStatus int) string {
+func (t TableModel) renderHeader(colIdx, colName, colVer, colLatest, colSize, colStatus int) string {
 	idx := padRight("#", colIdx)
 	name := padRight("NAME", colName)
 	ver := padRight("INSTALLED", colVer)
 	latest := padRight("LATEST", colLatest)
+	size := padRight("SIZE", colSize)
 	status := padRight("STATUS", colStatus)
-	return TableHeaderStyle.Width(t.width).Render(idx + name + ver + latest + status)
+	return TableHeaderStyle.Width(t.width).Render(idx + name + ver + latest + size + status)
 }
 
-func (t TableModel) renderRow(i, colIdx, colName, colVer, colLatest, colStatus int) string {
+func (t TableModel) renderRow(i, colIdx, colName, colVer, colLatest, colSize, colStatus int) string {
 	pkg := t.packages[i]
 	selected := i == t.cursor
 
@@ -161,9 +163,10 @@ func (t TableModel) renderRow(i, colIdx, colName, colVer, colLatest, colStatus i
 	name := padRight(pkg.Name, colName)
 	ver := padRight(pkg.InstalledVersion, colVer)
 	latest := padRight(pkg.LatestVersion, colLatest)
+	size := padRight(pkg.InstalledSize, colSize)
 
 	// Build the text parts
-	textRow := idxStr + name + ver + latest
+	textRow := idxStr + name + ver + latest + size
 
 	// Status badge — rendered inline, full row gets background from style
 	var statusText string
