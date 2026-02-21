@@ -1,4 +1,4 @@
-module github.com/akif/go-brew
+module github.com/akif/gobrew
 
 go 1.24.2
 

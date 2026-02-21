@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"github.com/akif/go-brew/internal/brew"
+	"github.com/akif/gobrew/internal/brew"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 )

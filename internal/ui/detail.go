@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/akif/go-brew/internal/brew"
+	"github.com/akif/gobrew/internal/brew"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
