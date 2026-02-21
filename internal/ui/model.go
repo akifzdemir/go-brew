@@ -1,81 +1,75 @@
 package ui
 
 import (
+	"strings"
+
 	"github.com/akif/gobrew/internal/brew"
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // View represents which screen is currently active.
 type View int
 
 const (
-	ViewTable  View = iota // main package list
-	ViewDetail             // package detail panel
-	ViewSearch             // search & install
-	ViewDoctor             // brew doctor output
+	ViewTable View = iota
+	ViewDetail
+	ViewSearch
+	ViewDoctor
 )
 
-// --- Messages ---
+// ---------------------------------------------------------------------------
+// Messages
+// ---------------------------------------------------------------------------
 
-// PackagesLoadedMsg is sent when the initial package list has been fetched.
 type PackagesLoadedMsg struct {
 	Packages []brew.Package
 	Err      error
 }
 
-// InfoLoadedMsg carries the result of `brew info`.
 type InfoLoadedMsg struct {
 	Info *brew.InfoResult
 	Err  error
 }
 
-// OperationDoneMsg is sent when an upgrade / uninstall / install finishes.
 type OperationDoneMsg struct {
 	Output string
 	Err    error
 }
 
-// SearchResultMsg carries search results.
 type SearchResultMsg struct {
 	Results []brew.Package
 	Err     error
 }
 
-// DoctorDoneMsg carries the output of `brew doctor`.
 type DoctorDoneMsg struct {
 	Output string
 	Err    error
 }
 
-// --- Root Model ---
+// ---------------------------------------------------------------------------
+// Root model
+// ---------------------------------------------------------------------------
 
-// Model is the top-level Bubble Tea model.
 type Model struct {
-	// Current active view
 	activeView View
+	width      int
+	height     int
 
-	// Terminal dimensions
-	width  int
-	height int
-
-	// Sub-models
 	tableModel  TableModel
 	detailModel DetailModel
 	searchModel SearchModel
 	doctorModel DoctorModel
 
-	// Global loading spinner (used during initial load)
 	spinner    spinner.Model
 	loading    bool
 	loadingMsg string
 
-	// Global status message shown in the footer
 	statusMsg   string
 	statusIsErr bool
 }
 
-// New creates and initialises the root model.
 func New() Model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -92,7 +86,6 @@ func New() Model {
 	return m
 }
 
-// Init starts the spinner and triggers the initial package load.
 func (m Model) Init() tea.Cmd {
 	return tea.Batch(
 		m.spinner.Tick,
@@ -100,10 +93,11 @@ func (m Model) Init() tea.Cmd {
 	)
 }
 
-// Update is the central message dispatcher.
-func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
+// ---------------------------------------------------------------------------
+// Update — BUG FIX: sub-models are always updated via their own handlers
+// ---------------------------------------------------------------------------
 
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 
 	case tea.WindowSizeMsg:
@@ -113,15 +107,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.detailModel.setSize(m.width, m.height)
 		m.searchModel.setSize(m.width, m.height)
 		m.doctorModel.setSize(m.width, m.height)
+		return m, nil
 
 	case spinner.TickMsg:
 		if m.loading {
 			var cmd tea.Cmd
 			m.spinner, cmd = m.spinner.Update(msg)
-			cmds = append(cmds, cmd)
+			return m, cmd
 		}
-
-	// --- data loading ---
+		return m, nil
 
 	case PackagesLoadedMsg:
 		m.loading = false
@@ -132,6 +126,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tableModel.setPackages(msg.Packages)
 			m.statusMsg = ""
 		}
+		return m, nil
 
 	case InfoLoadedMsg:
 		m.loading = false
@@ -143,6 +138,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.detailModel.setInfo(msg.Info)
 			m.activeView = ViewDetail
 		}
+		return m, nil
 
 	case OperationDoneMsg:
 		m.loading = false
@@ -153,11 +149,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusMsg = "Done."
 			m.statusIsErr = false
 		}
-		// Refresh the package list after any mutation
-		cmds = append(cmds, loadPackagesCmd())
+		// Refresh after mutation
 		m.loading = true
-		m.loadingMsg = "Refreshing packages..."
-		cmds = append(cmds, m.spinner.Tick)
+		m.loadingMsg = "Refreshing..."
+		return m, tea.Batch(m.spinner.Tick, loadPackagesCmd())
 
 	case SearchResultMsg:
 		m.loading = false
@@ -166,64 +161,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.statusIsErr = true
 		} else {
 			m.searchModel.setResults(msg.Results)
+			m.statusMsg = ""
 		}
+		return m, nil
 
 	case DoctorDoneMsg:
 		m.loading = false
 		m.doctorModel.setOutput(msg.Output, msg.Err)
 		m.activeView = ViewDoctor
-
-	// --- keyboard ---
+		return m, nil
 
 	case tea.KeyMsg:
 		// Global quit
 		if msg.String() == "ctrl+c" {
 			return m, tea.Quit
 		}
-
-		// Escape always goes back to table
+		// Escape back to table from any sub-view
 		if msg.String() == "esc" && m.activeView != ViewTable {
 			m.activeView = ViewTable
 			m.statusMsg = ""
 			return m, nil
 		}
+		// While loading, ignore all keys except ctrl+c
+		if m.loading {
+			return m, nil
+		}
 
 		switch m.activeView {
 		case ViewTable:
-			return m.handleTableKey(msg, cmds)
+			return m.handleTableKey(msg)
 		case ViewDetail:
-			return m.handleDetailKey(msg, cmds)
+			return m.handleDetailKey(msg)
 		case ViewSearch:
-			return m.handleSearchKey(msg, cmds)
+			return m.handleSearchKey(msg)
 		case ViewDoctor:
-			return m.handleDoctorKey(msg, cmds)
+			return m.handleDoctorKey(msg)
 		}
 	}
 
-	// Propagate updates to active sub-model
-	switch m.activeView {
-	case ViewDetail:
-		var cmd tea.Cmd
-		m.detailModel, cmd = m.detailModel.Update(msg)
-		cmds = append(cmds, cmd)
-	case ViewSearch:
-		var cmd tea.Cmd
-		m.searchModel, cmd = m.searchModel.Update(msg)
-		cmds = append(cmds, cmd)
-	case ViewDoctor:
-		var cmd tea.Cmd
-		m.doctorModel, cmd = m.doctorModel.Update(msg)
-		cmds = append(cmds, cmd)
-	default:
-		var cmd tea.Cmd
-		m.tableModel, cmd = m.tableModel.Update(msg)
-		cmds = append(cmds, cmd)
-	}
-
-	return m, tea.Batch(cmds...)
+	return m, nil
 }
 
-func (m Model) handleTableKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+// ---------------------------------------------------------------------------
+// Key handlers — BUG FIX: each handler forwards msg to its sub-model
+// ---------------------------------------------------------------------------
+
+func (m Model) handleTableKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// First let the table model handle navigation keys
+	var tableCmd tea.Cmd
+	m.tableModel, tableCmd = m.tableModel.Update(msg)
+
+	var cmds []tea.Cmd
+	if tableCmd != nil {
+		cmds = append(cmds, tableCmd)
+	}
+
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
@@ -231,6 +223,7 @@ func (m Model) handleTableKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cm
 	case "r":
 		m.loading = true
 		m.loadingMsg = "Refreshing packages..."
+		m.statusMsg = ""
 		cmds = append(cmds, m.spinner.Tick, loadPackagesCmd())
 
 	case "enter":
@@ -253,7 +246,7 @@ func (m Model) handleTableKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cm
 		cmds = append(cmds, m.spinner.Tick, upgradeAllCmd())
 
 	case "x":
-		if pkg := m.tableModel.selectedPackage(); pkg != nil {
+		if m.tableModel.selectedPackage() != nil {
 			m.tableModel.setConfirm(true)
 		}
 
@@ -284,14 +277,22 @@ func (m Model) handleTableKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cm
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) handleDetailKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m Model) handleDetailKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Forward to detail model for scrolling
+	var cmd tea.Cmd
+	m.detailModel, cmd = m.detailModel.Update(msg)
+	var cmds []tea.Cmd
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+
 	switch msg.String() {
 	case "q":
 		return m, tea.Quit
 	case "u":
-		if m.detailModel.info != nil && m.tableModel.selectedPackage() != nil {
+		if m.detailModel.info != nil {
 			pkg := m.tableModel.selectedPackage()
-			if pkg.Outdated {
+			if pkg != nil && pkg.Outdated {
 				m.loading = true
 				m.loadingMsg = "Upgrading " + pkg.Name + "..."
 				m.activeView = ViewTable
@@ -310,7 +311,15 @@ func (m Model) handleDetailKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.C
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) handleSearchKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
+func (m Model) handleSearchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Forward to search model for input handling / navigation
+	var subCmd tea.Cmd
+	m.searchModel, subCmd = m.searchModel.Update(msg)
+	var cmds []tea.Cmd
+	if subCmd != nil {
+		cmds = append(cmds, subCmd)
+	}
+
 	switch msg.String() {
 	case "q":
 		if !m.searchModel.inputFocused() {
@@ -325,7 +334,6 @@ func (m Model) handleSearchKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.C
 				cmds = append(cmds, m.spinner.Tick, searchCmd(query))
 			}
 		} else {
-			// Install selected result
 			if pkg := m.searchModel.selectedPackage(); pkg != nil {
 				m.loading = true
 				m.loadingMsg = "Installing " + pkg.Name + "..."
@@ -337,118 +345,172 @@ func (m Model) handleSearchKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.C
 	return m, tea.Batch(cmds...)
 }
 
-func (m Model) handleDoctorKey(msg tea.KeyMsg, cmds []tea.Cmd) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q":
+func (m Model) handleDoctorKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Forward to doctor model for scrolling
+	var cmd tea.Cmd
+	m.doctorModel, cmd = m.doctorModel.Update(msg)
+	var cmds []tea.Cmd
+	if cmd != nil {
+		cmds = append(cmds, cmd)
+	}
+	if msg.String() == "q" {
 		return m, tea.Quit
 	}
 	return m, tea.Batch(cmds...)
 }
 
-// View renders the current screen.
+// ---------------------------------------------------------------------------
+// View — BUG FIX: loading text only appears once, in the body
+// ---------------------------------------------------------------------------
+
 func (m Model) View() string {
 	if m.width == 0 {
 		return ""
 	}
 
-	header := m.renderHeader()
-	footer := m.renderFooter()
+	// Fixed heights
+	contentH := m.height - headerHeight - footerHeight
+	if contentH < 1 {
+		contentH = 1
+	}
 
-	// Reserve rows for header (1) + footer (1)
-	contentHeight := m.height - 2
+	header := m.renderHeader()
+	footer := m.renderFooter() // never shows loading state — bug fixed
 
 	var body string
 	if m.loading {
-		body = m.renderLoading(contentHeight)
+		// BUG FIX: spinner only rendered here, not also in footer
+		body = m.renderLoading(contentH)
 	} else {
 		switch m.activeView {
 		case ViewTable:
-			body = m.tableModel.View(contentHeight)
+			body = m.tableModel.View(contentH)
 		case ViewDetail:
-			body = m.detailModel.View(contentHeight)
+			body = m.detailModel.View(contentH)
 		case ViewSearch:
-			body = m.searchModel.View(contentHeight)
+			body = m.searchModel.View(contentH)
 		case ViewDoctor:
-			body = m.doctorModel.View(contentHeight)
+			body = m.doctorModel.View(contentH)
 		}
 	}
 
-	return header + "\n" + body + "\n" + footer
+	return header + body + "\n" + footer
 }
+
+// ---------------------------------------------------------------------------
+// Header — full-width bar with title + subtitle
+// ---------------------------------------------------------------------------
 
 func (m Model) renderHeader() string {
-	title := AppTitleStyle.Render(" go-brew ")
-	version := MutedStyle.Render("homebrew manager")
-	space := m.width - lipglossWidth(title) - lipglossWidth(version) - 4
-	if space < 1 {
-		space = 1
+	title := HeaderTitleStyle.Render("  gobrew")
+	subtitle := HeaderSubtitleStyle.Render("homebrew manager")
+
+	// Fill the remaining space
+	used := lipgloss.Width(title) + lipgloss.Width(subtitle)
+	gap := m.width - used
+	if gap < 0 {
+		gap = 0
 	}
-	line := title + repeatStr(" ", space) + version + "  "
-	return HeaderStyle.Width(m.width).Render(line)
+	filler := HeaderBarStyle.Width(gap).Render("")
+
+	topBar := lipgloss.JoinHorizontal(lipgloss.Top, title, filler, subtitle)
+	topBar = HeaderBarStyle.Width(m.width).Render(topBar)
+
+	divider := HeaderDividerStyle.Width(m.width).Render(strings.Repeat("─", m.width))
+
+	return topBar + "\n" + divider + "\n"
 }
 
+// ---------------------------------------------------------------------------
+// Footer — keybinds on left, view name on right
+// ---------------------------------------------------------------------------
+
 func (m Model) renderFooter() string {
-	var hint string
+	var leftPart string
 
-	if m.loading {
-		hint = m.spinner.View() + " " + m.loadingMsg
-		return FooterStyle.Width(m.width).Render(hint)
-	}
-
+	// Status message takes priority over keybind hints
 	if m.statusMsg != "" {
 		if m.statusIsErr {
-			hint = ErrorStyle.Render("✗ " + m.statusMsg)
+			leftPart = ErrorStyle.Render("✗ " + m.statusMsg)
 		} else {
-			hint = SuccessStyle.Render("✓ " + m.statusMsg)
+			leftPart = SuccessStyle.Render("✓ " + m.statusMsg)
 		}
-		return FooterStyle.Width(m.width).Render(hint)
+	} else if m.tableModel.confirmPending && m.activeView == ViewTable {
+		leftPart = WarningStyle.Render("Uninstall? ") +
+			FooterKeyStyle.Render("y") + FooterDescStyle.Render(" yes") +
+			FooterSepStyle.Render("  /  ") +
+			FooterKeyStyle.Render("n") + FooterDescStyle.Render(" no")
+	} else {
+		leftPart = m.footerHints()
 	}
+
+	// Right side: current view name
+	var viewName string
+	switch m.activeView {
+	case ViewTable:
+		viewName = "packages"
+	case ViewDetail:
+		viewName = "detail"
+	case ViewSearch:
+		viewName = "search"
+	case ViewDoctor:
+		viewName = "doctor"
+	}
+	rightPart := FooterSepStyle.Render(viewName + " ")
+
+	leftW := lipgloss.Width(leftPart)
+	rightW := lipgloss.Width(rightPart)
+	gap := m.width - leftW - rightW - 4 // 4 = padding on both sides
+	if gap < 1 {
+		gap = 1
+	}
+
+	line := leftPart + strings.Repeat(" ", gap) + rightPart
+	return FooterStyle.Width(m.width).Render(line)
+}
+
+func (m Model) footerHints() string {
+	k := func(key, desc string) string {
+		return FooterKeyStyle.Render(key) + FooterDescStyle.Render(" "+desc)
+	}
+	s := FooterSepStyle.Render(" · ")
 
 	switch m.activeView {
 	case ViewTable:
-		if m.tableModel.confirmPending {
-			hint = WarningStyle.Render("Uninstall? ") +
-				FooterKeyStyle.Render("y") + FooterDescStyle.Render(" yes  ") +
-				FooterKeyStyle.Render("n") + FooterDescStyle.Render(" no")
-		} else {
-			hint = key("↑↓", "navigate") + sep() +
-				key("enter", "info") + sep() +
-				key("u", "upgrade") + sep() +
-				key("U", "upgrade all") + sep() +
-				key("x", "uninstall") + sep() +
-				key("/", "search") + sep() +
-				key("d", "doctor") + sep() +
-				key("r", "refresh") + sep() +
-				key("q", "quit")
-		}
+		return k("↑↓", "move") + s + k("enter", "info") + s +
+			k("u", "upgrade") + s + k("U", "upg.all") + s +
+			k("x", "uninstall") + s + k("/", "search") + s +
+			k("d", "doctor") + s + k("r", "refresh") + s + k("q", "quit")
 	case ViewDetail:
-		hint = key("esc", "back") + sep() +
-			key("u", "upgrade") + sep() +
-			key("x", "uninstall") + sep() +
-			key("q", "quit")
+		return k("↑↓", "scroll") + s + k("u", "upgrade") + s +
+			k("x", "uninstall") + s + k("esc", "back") + s + k("q", "quit")
 	case ViewSearch:
-		hint = key("esc", "back") + sep() +
-			key("tab", "toggle input/list") + sep() +
-			key("enter", "search/install") + sep() +
-			key("q", "quit")
+		return k("tab", "focus") + s + k("enter", "search/install") + s +
+			k("↑↓", "move") + s + k("esc", "back")
 	case ViewDoctor:
-		hint = key("esc", "back") + sep() +
-			key("↑↓", "scroll") + sep() +
-			key("q", "quit")
+		return k("↑↓", "scroll") + s + k("esc", "back") + s + k("q", "quit")
 	}
-
-	return FooterStyle.Width(m.width).Render(hint)
+	return ""
 }
+
+// ---------------------------------------------------------------------------
+// Loading screen — BUG FIX: only one place renders the spinner
+// ---------------------------------------------------------------------------
 
 func (m Model) renderLoading(height int) string {
-	// Center vertically
-	pad := height / 2
-	line := SpinnerStyle.Render(m.spinner.View()) + "  " + m.loadingMsg
-	out := repeatStr("\n", pad) + centerStr(line, m.width)
-	return out
+	spinLine := SpinnerStyle.Render(m.spinner.View()) + "  " +
+		MutedStyle.Render(m.loadingMsg)
+
+	return lipgloss.Place(
+		m.width, height,
+		lipgloss.Center, lipgloss.Center,
+		spinLine,
+	)
 }
 
-// --- tea.Cmd factories ---
+// ---------------------------------------------------------------------------
+// tea.Cmd factories
+// ---------------------------------------------------------------------------
 
 func loadPackagesCmd() tea.Cmd {
 	return func() tea.Msg {
@@ -504,58 +566,4 @@ func doctorCmd() tea.Cmd {
 		out, err := brew.Doctor()
 		return DoctorDoneMsg{Output: out, Err: err}
 	}
-}
-
-// --- misc helpers ---
-
-func key(k, desc string) string {
-	return FooterKeyStyle.Render(k) + FooterDescStyle.Render(" "+desc)
-}
-
-func sep() string {
-	return MutedStyle.Render("  ·  ")
-}
-
-func repeatStr(s string, n int) string {
-	if n <= 0 {
-		return ""
-	}
-	out := ""
-	for i := 0; i < n; i++ {
-		out += s
-	}
-	return out
-}
-
-func centerStr(s string, width int) string {
-	w := lipglossWidth(s)
-	pad := (width - w) / 2
-	if pad < 0 {
-		pad = 0
-	}
-	return repeatStr(" ", pad) + s
-}
-
-func lipglossWidth(s string) int {
-	return len([]rune(stripANSI(s)))
-}
-
-// stripANSI removes ANSI escape codes for width calculation.
-func stripANSI(s string) string {
-	var result []rune
-	inEscape := false
-	for _, r := range s {
-		if inEscape {
-			if r == 'm' {
-				inEscape = false
-			}
-			continue
-		}
-		if r == '\x1b' {
-			inEscape = true
-			continue
-		}
-		result = append(result, r)
-	}
-	return string(result)
 }
